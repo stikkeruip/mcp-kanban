@@ -4,6 +4,7 @@ from tasks_mcp.config import (
     DEFAULT_TRANSITION_POLICY,
     ENV_DB_PATH,
     ENV_TRANSITION_POLICY,
+    ENV_WEB_AUTOSTART,
     load_config,
 )
 
@@ -22,3 +23,11 @@ def test_policy_defaults_to_free_and_is_overridable(tmp_path):
     )
     cfg = load_config(env={ENV_DB_PATH: db, ENV_TRANSITION_POLICY: "linear"})
     assert cfg.transition_policy == "linear"
+
+
+def test_web_autostart_defaults_on_and_can_be_disabled(tmp_path):
+    db = str(tmp_path / "t.db")
+    assert load_config(env={ENV_DB_PATH: db}).web_autostart is True
+    for value in ("0", "false", "no", "OFF"):
+        cfg = load_config(env={ENV_DB_PATH: db, ENV_WEB_AUTOSTART: value})
+        assert cfg.web_autostart is False

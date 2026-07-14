@@ -8,7 +8,8 @@ import pytest
 from fastmcp import Client
 
 from tasks_mcp.config import AppConfig
-from tasks_mcp.mcp.server import _build_policy, build_server
+from tasks_mcp.mcp.server import build_server
+from tasks_mcp.wiring import build_policy
 
 EXPECTED_TOOLS = {
     "add_task",
@@ -42,7 +43,7 @@ def call(server, tool, args=None):
 
 def test_unknown_transition_policy_is_refused():
     with pytest.raises(ValueError, match="unknown transition policy"):
-        _build_policy("chaotic")
+        build_policy("chaotic")
 
 
 def test_all_seven_tools_are_registered(tmp_path):

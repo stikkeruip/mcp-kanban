@@ -1,8 +1,7 @@
-"""Composition root: the ONLY place concrete classes are wired together.
+"""MCP entry point and composition root.
 
-Read config → open the database → run migrations → build the policy →
-construct the service → register tools → serve. Everything else in the
-codebase receives its dependencies; nothing else constructs them.
+Read config → build the service (shared wiring) → register tools → serve
+over stdio. Everything else receives its dependencies.
 """
 
 from __future__ import annotations
@@ -10,39 +9,14 @@ from __future__ import annotations
 from fastmcp import FastMCP
 
 from tasks_mcp.config import AppConfig, load_config
-from tasks_mcp.domain.transitions import FreeTransitionPolicy, TransitionPolicy
 from tasks_mcp.mcp.tools import register_tools
-from tasks_mcp.services.task_service import TaskService
-from tasks_mcp.storage.migrations.runner import run_migrations
-from tasks_mcp.storage.sqlite_repository import SqliteTaskRepository, connect
-
-# The documented hook for future policies: add a class in
-# tasks_mcp.domain.transitions, register it here, select it via the
-# TASKS_MCP_TRANSITIONS env var. No other code changes.
-_POLICIES: dict[str, type] = {
-    "free": FreeTransitionPolicy,
-}
-
-
-def _build_policy(name: str) -> TransitionPolicy:
-    """Instantiate the transition policy selected in config."""
-    try:
-        return _POLICIES[name]()
-    except KeyError:
-        valid = ", ".join(sorted(_POLICIES))
-        raise ValueError(
-            f"unknown transition policy {name!r}: expected one of {valid}"
-        ) from None
+from tasks_mcp.wiring import build_service
 
 
 def build_server(config: AppConfig | None = None) -> FastMCP:
     """Wire the full dependency graph and return a ready-to-run server."""
     cfg = config if config is not None else load_config()
-
-    conn = connect(cfg.db_path)
-    run_migrations(conn)
-    repo = SqliteTaskRepository(conn)
-    service = TaskService(repo, _build_policy(cfg.transition_policy))
+    service = build_service(cfg)
 
     mcp = FastMCP(
         name="tasks-mcp",
@@ -57,8 +31,18 @@ def build_server(config: AppConfig | None = None) -> FastMCP:
 
 
 def main() -> None:
-    """Entry point (``tasks-mcp`` script): serve over stdio."""
-    build_server().run()
+    """Entry point (``tasks-mcp`` script): serve over stdio.
+
+    Also ensures the shared browser board is up (unless disabled via
+    ``TASKS_MCP_WEB_AUTOSTART=0``): whichever session starts first spawns
+    it; everyone else finds the port occupied and moves on.
+    """
+    cfg = load_config()
+    if cfg.web_autostart:
+        from tasks_mcp.web.autostart import ensure_web_running
+
+        ensure_web_running(cfg)
+    build_server(cfg).run()
 
 
 if __name__ == "__main__":

@@ -21,6 +21,8 @@ uv run tasks-mcp
 
 That resolves the environment, installs the single runtime dependency (`fastmcp`), and serves over stdio — uv even downloads a suitable Python if the machine has none. It is also exactly what an MCP host runs for you (see below).
 
+The `tasks-mcp` / `tasks-mcp-web` console scripts exist too, but prefer the `python -m tasks_mcp` / `python -m tasks_mcp.web` module form for anything long-running: Windows locks a running `.exe`, which blocks `uv run` from refreshing the environment while a server is up.
+
 To install uv itself, see the [official installation guide](https://docs.astral.sh/uv/getting-started/installation/).
 
 ### Option B: plain venv (no uv)
@@ -48,7 +50,7 @@ Add to `claude_desktop_config.json` (Windows: `%AppData%\Claude\`, macOS: `~/Lib
   "mcpServers": {
     "tasks": {
       "command": "uv",
-      "args": ["--directory", "C:\\dev\\mcp-kanban", "run", "tasks-mcp"]
+      "args": ["--directory", "C:\\dev\\mcp-kanban", "run", "python", "-m", "tasks_mcp"]
     }
   }
 }
@@ -78,6 +80,9 @@ Then try: *"add a task to buy milk"*, *"show my board"*, *"move it to testing"*.
 |---|---|---|
 | `TASKS_MCP_DB` | `~/.local/share/tasks-mcp/tasks.db` | SQLite database path (parent dir is created) |
 | `TASKS_MCP_TRANSITIONS` | `free` | Transition policy. `free` = any column to any column. Hook for a future `linear` policy. |
+| `TASKS_MCP_WEB_HOST` | `127.0.0.1` | Bind address for the web view. |
+| `TASKS_MCP_WEB_PORT` | `8765` | Port for the web view. |
+| `TASKS_MCP_WEB_AUTOSTART` | `1` | MCP sessions spawn the web view if it isn't running. `0` to disable. |
 
 Set them via the `env` key of the MCP config entry if you want a non-default location.
 
@@ -93,6 +98,22 @@ Set them via the `env` key of the MCP config entry if you want a non-default loc
 | `archive_task` | Soft delete. No hard delete exists. |
 | `get_board` | The whole board grouped by column; always all four columns, in order. |
 
+## Web view (drag & drop board)
+
+A browser UI over the same database, runnable alongside the MCP server (WAL mode makes concurrent access safe).
+
+**It starts itself:** whenever an MCP session launches (Claude Desktop, Claude Code, ...), it checks the web port and spawns the board in the background if nothing is listening — whichever session comes first starts it, the rest find it running. Every MCP host process is independent, but they all share the database and this one web view. Set `TASKS_MCP_WEB_AUTOSTART=0` to opt out. It keeps running after sessions close; stop it by killing the `python -m tasks_mcp.web` process.
+
+To run it manually instead:
+
+```bash
+uv run python -m tasks_mcp.web        # or .venv\Scripts\python -m tasks_mcp.web with the venv install
+```
+
+Then open <http://127.0.0.1:8765>. Drag cards between columns to move them, click a card to edit or archive it, add tasks from the header. The page polls every few seconds, so changes Claude makes through MCP appear on their own.
+
+It exposes the same seven operations as JSON endpoints (`/api/board`, `/api/tasks`, `/api/tasks/{id}`, `/api/tasks/{id}/move`, `/api/tasks/{id}/archive`) and is built on the stdlib HTTP server — no new dependencies, no build step. Binds to localhost only by default (`TASKS_MCP_WEB_HOST` / `TASKS_MCP_WEB_PORT` to change).
+
 ## Architecture
 
 Dependencies point inward: `mcp → services → storage(interface) + domain`.
@@ -102,7 +123,9 @@ src/tasks_mcp/
 ├── domain/       # pure data + rules, zero I/O (Task, Status, Priority, TransitionPolicy)
 ├── storage/      # TaskRepository interface, SQLite impl, versioned migration runner
 ├── services/     # TaskService — all business logic, typed exceptions
-├── mcp/          # thin, disposable adapter: tools + composition root
+├── mcp/          # thin, disposable adapter: MCP tools
+├── web/          # thin, disposable adapter: JSON API + drag-and-drop board UI
+├── wiring.py     # shared composition: config → service object graph
 └── config.py     # env resolution in one place
 ```
 
@@ -111,13 +134,13 @@ Design decisions worth knowing:
 - **Storage is swappable.** The service layer codes against the abstract `TaskRepository`; the SQLite implementation (raw SQL, no ORM) is the only file that knows how a task is stored. WAL mode is on, so a future read-only consumer (e.g. an HTML board view) can read while the server writes.
 - **Schema changes are migrations.** A versioned runner applies `NNN_*.sql` files in order, each in its own transaction, on every startup. Adding a field later = dropping a new `002_*.sql` file next to `001_initial.sql`. Never a manual `ALTER`.
 - **Transitions are a policy object.** v1 ships `FreeTransitionPolicy`. A strict linear pipeline is a new class registered in `mcp/server.py` and selected via `TASKS_MCP_TRANSITIONS` — zero changes to existing code.
-- **The MCP layer is disposable.** Tools parse input, call one service method, format output. Replacing MCP with a CLI or web app touches nothing beneath `mcp/`.
+- **Adapters are disposable.** MCP tools and web endpoints alike parse input, call one service method, format output. The web view was added without touching a line beneath the adapter layer — the proof the seams work.
 
 ## Development
 
 ```bash
 uv sync                # create venv with dev deps
-uv run pytest          # 71 tests: domain, storage, services, MCP protocol smoke
+uv run pytest          # domain, storage, services, MCP protocol, web API
 ```
 
-The service tests run against an in-memory SQLite repository; the MCP tests exercise the wired server through an in-memory MCP client — the same protocol path a real host uses.
+The service tests run against an in-memory SQLite repository; the MCP tests exercise the wired server through an in-memory MCP client; the web tests hit a live threaded server over real HTTP.

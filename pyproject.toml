@@ -11,6 +11,7 @@ dependencies = [
 
 [project.scripts]
 tasks-mcp = "tasks_mcp.mcp.server:main"
+tasks-mcp-web = "tasks_mcp.web.server:main"
 
 [dependency-groups]
 dev = [

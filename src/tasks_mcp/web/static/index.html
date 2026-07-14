@@ -1,0 +1,315 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>tasks</title>
+<style>
+  :root {
+    --bg: #f4f5f7; --col: #ebecf0; --card: #ffffff; --ink: #172b4d;
+    --muted: #6b778c; --accent: #0052cc; --danger: #de350b;
+    --high: #de350b; --normal: #0052cc; --low: #97a0af;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 14px/1.45 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  header {
+    display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+    padding: 14px 20px; background: #fff; border-bottom: 1px solid #dfe1e6;
+    position: sticky; top: 0; z-index: 2;
+  }
+  header h1 { margin: 0; font-size: 18px; }
+  #add-form { display: flex; gap: 8px; flex: 1; min-width: 280px; max-width: 560px; }
+  #add-title { flex: 1; padding: 7px 10px; border: 1px solid #dfe1e6; border-radius: 4px; }
+  select, button { padding: 7px 10px; border: 1px solid #dfe1e6; border-radius: 4px; background: #fff; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; cursor: pointer; }
+  #status { margin-left: auto; font-size: 12px; color: var(--muted); }
+
+  main {
+    display: grid; grid-template-columns: repeat(4, 1fr);
+    gap: 14px; padding: 16px 20px; align-items: start;
+  }
+  @media (max-width: 900px) { main { grid-template-columns: repeat(2, 1fr); } }
+
+  .column { background: var(--col); border-radius: 8px; padding: 8px; min-height: 140px; }
+  .column h2 {
+    margin: 4px 6px 8px; font-size: 12px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: .04em; color: var(--muted);
+  }
+  .column h2 .count { font-weight: 400; }
+  .column.dragover { outline: 2px dashed var(--accent); outline-offset: -2px; }
+  .cards { display: flex; flex-direction: column; gap: 8px; min-height: 40px; }
+
+  .card {
+    background: var(--card); border-radius: 6px; padding: 8px 10px;
+    box-shadow: 0 1px 1px rgba(9,30,66,.25); cursor: grab;
+    border-left: 3px solid var(--normal);
+  }
+  .card.prio-high   { border-left-color: var(--high); }
+  .card.prio-low    { border-left-color: var(--low); }
+  .card.dragging { opacity: .45; }
+  .card .title { word-break: break-word; }
+  .card .meta { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 6px; }
+  .tag {
+    font-size: 11px; background: #e4e6ea; color: var(--muted);
+    border-radius: 3px; padding: 1px 6px;
+  }
+
+  dialog {
+    border: none; border-radius: 8px; padding: 20px; width: min(440px, 92vw);
+    box-shadow: 0 8px 28px rgba(9,30,66,.35);
+  }
+  dialog::backdrop { background: rgba(9,30,66,.45); }
+  dialog h2 { margin: 0 0 14px; font-size: 16px; }
+  dialog label { display: block; margin-bottom: 10px; font-size: 12px; color: var(--muted); }
+  dialog input, dialog textarea, dialog select {
+    display: block; width: 100%; margin-top: 3px; padding: 7px 10px;
+    border: 1px solid #dfe1e6; border-radius: 4px; font: inherit; color: var(--ink);
+  }
+  dialog textarea { resize: vertical; min-height: 70px; }
+  dialog menu { display: flex; gap: 8px; justify-content: flex-end; margin: 16px 0 0; padding: 0; }
+  button.danger { color: var(--danger); border-color: currentColor; cursor: pointer; margin-right: auto; }
+</style>
+</head>
+<body>
+<header>
+  <h1>tasks</h1>
+  <form id="add-form">
+    <input id="add-title" placeholder="Add a task to the backlog…" required maxlength="200">
+    <select id="add-priority">
+      <option value="low">low</option>
+      <option value="normal" selected>normal</option>
+      <option value="high">high</option>
+    </select>
+    <button class="primary">Add</button>
+  </form>
+  <span id="status"></span>
+</header>
+
+<main id="board"></main>
+
+<dialog id="edit-dialog">
+  <form method="dialog" id="edit-form">
+    <h2>Edit task #<span id="edit-id"></span></h2>
+    <label>Title
+      <input id="edit-title" required maxlength="200">
+    </label>
+    <label>Description
+      <textarea id="edit-desc"></textarea>
+    </label>
+    <label>Priority
+      <select id="edit-priority">
+        <option value="low">low</option>
+        <option value="normal">normal</option>
+        <option value="high">high</option>
+      </select>
+    </label>
+    <label>Tags (comma separated)
+      <input id="edit-tags">
+    </label>
+    <menu>
+      <button value="archive" class="danger" formnovalidate>Archive</button>
+      <button value="cancel" formnovalidate>Cancel</button>
+      <button value="save" class="primary">Save</button>
+    </menu>
+  </form>
+</dialog>
+
+<script>
+"use strict";
+
+const COLUMNS = [
+  ["backlog", "Backlog"],
+  ["in_progress", "In progress"],
+  ["testing", "Testing"],
+  ["done", "Done"],
+];
+
+const $ = (id) => document.getElementById(id);
+let draggingId = null;   // task id being dragged, or null
+let editingTask = null;  // task object open in the dialog, or null
+
+async function api(path, options = {}) {
+  const res = await fetch(path, {
+    headers: { "Content-Type": "application/json" },
+    ...options,
+  });
+  if (!res.ok) {
+    let message = res.statusText;
+    try { message = (await res.json()).error || message; } catch {}
+    throw new Error(message);
+  }
+  return res.json();
+}
+
+/* ---------- rendering ---------- */
+
+function render(board) {
+  const byStatus = {};
+  for (const column of board.columns) byStatus[column.status] = column.tasks;
+
+  const main = $("board");
+  main.textContent = "";
+  for (const [status, label] of COLUMNS) {
+    const tasks = byStatus[status] || [];
+
+    const section = document.createElement("section");
+    section.className = "column";
+    section.dataset.status = status;
+
+    const h2 = document.createElement("h2");
+    h2.textContent = label + " ";
+    const count = document.createElement("span");
+    count.className = "count";
+    count.textContent = `(${tasks.length})`;
+    h2.appendChild(count);
+    section.appendChild(h2);
+
+    const cards = document.createElement("div");
+    cards.className = "cards";
+    for (const task of tasks) cards.appendChild(renderCard(task));
+    section.appendChild(cards);
+
+    section.addEventListener("dragover", (event) => {
+      event.preventDefault();
+      section.classList.add("dragover");
+    });
+    section.addEventListener("dragleave", () => section.classList.remove("dragover"));
+    section.addEventListener("drop", (event) => onDrop(event, section));
+
+    main.appendChild(section);
+  }
+}
+
+function renderCard(task) {
+  const card = document.createElement("div");
+  card.className = `card prio-${task.priority}`;
+  card.draggable = true;
+  card.dataset.id = task.id;
+  card.dataset.status = task.status;
+
+  const title = document.createElement("div");
+  title.className = "title";
+  title.textContent = task.title;
+  card.appendChild(title);
+
+  if (task.tags.length) {
+    const meta = document.createElement("div");
+    meta.className = "meta";
+    for (const tag of task.tags) {
+      const chip = document.createElement("span");
+      chip.className = "tag";
+      chip.textContent = tag;
+      meta.appendChild(chip);
+    }
+    card.appendChild(meta);
+  }
+
+  card.addEventListener("dragstart", (event) => {
+    draggingId = task.id;
+    event.dataTransfer.setData("text/plain", String(task.id));
+    event.dataTransfer.effectAllowed = "move";
+    card.classList.add("dragging");
+  });
+  card.addEventListener("dragend", () => {
+    draggingId = null;
+    card.classList.remove("dragging");
+  });
+  card.addEventListener("click", () => openEditor(task));
+  return card;
+}
+
+/* ---------- actions ---------- */
+
+async function onDrop(event, section) {
+  event.preventDefault();
+  section.classList.remove("dragover");
+  const id = Number(event.dataTransfer.getData("text/plain"));
+  const card = document.querySelector(`.card[data-id="${id}"]`);
+  const target = section.dataset.status;
+  draggingId = null;
+  if (!id || !card || card.dataset.status === target) return;
+  await act(() => api(`/api/tasks/${id}/move`, {
+    method: "POST",
+    body: JSON.stringify({ target_status: target }),
+  }));
+}
+
+$("add-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const title = $("add-title").value.trim();
+  if (!title) return;
+  await act(() => api("/api/tasks", {
+    method: "POST",
+    body: JSON.stringify({ title, priority: $("add-priority").value }),
+  }));
+  $("add-title").value = "";
+  $("add-title").focus();
+});
+
+function openEditor(task) {
+  editingTask = task;
+  $("edit-id").textContent = task.id;
+  $("edit-title").value = task.title;
+  $("edit-desc").value = task.description || "";
+  $("edit-priority").value = task.priority;
+  $("edit-tags").value = task.tags.join(", ");
+  $("edit-dialog").showModal();
+}
+
+$("edit-dialog").addEventListener("close", async () => {
+  const task = editingTask;
+  editingTask = null;
+  const action = $("edit-dialog").returnValue;
+  if (!task || action === "cancel" || action === "") return;
+
+  if (action === "archive") {
+    if (confirm(`Archive task #${task.id}? It will disappear from the board but stay in the database.`)) {
+      await act(() => api(`/api/tasks/${task.id}/archive`, { method: "POST" }));
+    } else {
+      refresh();
+    }
+    return;
+  }
+
+  const tags = $("edit-tags").value.split(",").map((t) => t.trim()).filter(Boolean);
+  await act(() => api(`/api/tasks/${task.id}`, {
+    method: "PATCH",
+    body: JSON.stringify({
+      title: $("edit-title").value,
+      description: $("edit-desc").value,  // empty string clears it
+      priority: $("edit-priority").value,
+      tags,
+    }),
+  }));
+});
+
+/* ---------- refresh loop ---------- */
+
+async function act(call) {
+  try {
+    await call();
+    await refresh(true);
+  } catch (error) {
+    alert(error.message);
+    refresh(true);
+  }
+}
+
+async function refresh(force = false) {
+  if (!force && (draggingId !== null || editingTask !== null)) return;
+  try {
+    render(await api("/api/board"));
+    $("status").textContent = "";
+  } catch (error) {
+    $("status").textContent = "disconnected — is tasks-mcp-web running?";
+  }
+}
+
+refresh();
+setInterval(refresh, 4000);
+</script>
+</body>
+</html>
