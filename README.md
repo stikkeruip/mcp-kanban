@@ -7,9 +7,11 @@ Tasks are never hard-deleted: archiving hides a task from listings but keeps it 
 ## Requirements
 
 - Python 3.11+
-- [`uv`](https://docs.astral.sh/uv/)
+- [`uv`](https://docs.astral.sh/uv/) (recommended, not required — see the venv option below)
 
 ## Install & run
+
+### Option A: uv (recommended)
 
 From this directory:
 
@@ -17,7 +19,25 @@ From this directory:
 uv run tasks-mcp
 ```
 
-That resolves the environment, installs the single runtime dependency (`fastmcp`), and serves over stdio. It is also exactly what an MCP host runs for you (see below).
+That resolves the environment, installs the single runtime dependency (`fastmcp`), and serves over stdio — uv even downloads a suitable Python if the machine has none. It is also exactly what an MCP host runs for you (see below).
+
+Install uv itself with `winget install --id=astral-sh.uv -e` (Windows) or `curl -LsSf https://astral.sh/uv/install.sh | sh` (macOS/Linux).
+
+### Option B: plain venv (no uv)
+
+```powershell
+# Windows
+py -3.13 -m venv .venv
+.venv\Scripts\pip install -e .
+```
+
+```bash
+# macOS/Linux
+python3 -m venv .venv
+.venv/bin/pip install -e .
+```
+
+The server is then the `tasks-mcp` entry point inside the venv (`.venv\Scripts\tasks-mcp.exe` on Windows, `.venv/bin/tasks-mcp` elsewhere). Re-run the `pip install` step after pulling dependency changes.
 
 ## Registering with Claude Desktop / Cowork
 
@@ -35,6 +55,20 @@ Add to `claude_desktop_config.json` (Windows: `%AppData%\Claude\`, macOS: `~/Lib
 ```
 
 On macOS/Linux use the absolute path to this folder in `--directory`. If `uv` is not on the host's PATH, use the full path to the executable (`where uv` / `which uv`). Restart the Claude app fully after saving.
+
+If you went with the venv install (Option B), point the config straight at the entry point instead — no `args` needed:
+
+```json
+{
+  "mcpServers": {
+    "tasks": {
+      "command": "C:\\dev\\mcp-kanban\\.venv\\Scripts\\tasks-mcp.exe"
+    }
+  }
+}
+```
+
+(macOS/Linux: `"command": "/path/to/mcp-kanban/.venv/bin/tasks-mcp"`.)
 
 Then try: *"add a task to buy milk"*, *"show my board"*, *"move it to testing"*.
 
