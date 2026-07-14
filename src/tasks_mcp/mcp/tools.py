@@ -48,7 +48,7 @@ def _service_errors():
 def register_tools(mcp: FastMCP, service: TaskService) -> None:
     """Register the seven board tools on a FastMCP server instance."""
 
-    @mcp.tool
+    @mcp.tool(annotations={"destructiveHint": False, "openWorldHint": False})
     def add_task(
         title: str,
         description: str | None = None,
@@ -72,7 +72,7 @@ def register_tools(mcp: FastMCP, service: TaskService) -> None:
                 )
             )
 
-    @mcp.tool
+    @mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": False})
     def list_tasks(
         status: str | None = None,
         tag: str | None = None,
@@ -103,7 +103,7 @@ def register_tools(mcp: FastMCP, service: TaskService) -> None:
                 )
             ]
 
-    @mcp.tool
+    @mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": False})
     def get_task(task_id: int) -> dict:
         """Get the full detail of one task by its numeric id.
 
@@ -112,7 +112,13 @@ def register_tools(mcp: FastMCP, service: TaskService) -> None:
         with _service_errors():
             return task_to_dict(service.get_task(task_id))
 
-    @mcp.tool
+    @mcp.tool(
+        annotations={
+            "destructiveHint": False,
+            "idempotentHint": True,
+            "openWorldHint": False,
+        }
+    )
     def edit_task(
         task_id: int,
         title: str | None = None,
@@ -140,7 +146,13 @@ def register_tools(mcp: FastMCP, service: TaskService) -> None:
                 )
             )
 
-    @mcp.tool
+    @mcp.tool(
+        annotations={
+            "destructiveHint": False,
+            "idempotentHint": True,
+            "openWorldHint": False,
+        }
+    )
     def move_task(task_id: int, target_status: str) -> dict:
         """Move a task to another kanban column.
 
@@ -154,7 +166,13 @@ def register_tools(mcp: FastMCP, service: TaskService) -> None:
         with _service_errors():
             return task_to_dict(service.move_task(task_id, target_status))
 
-    @mcp.tool
+    @mcp.tool(
+        annotations={
+            "destructiveHint": False,
+            "idempotentHint": True,
+            "openWorldHint": False,
+        }
+    )
     def archive_task(task_id: int) -> dict:
         """Archive a task (soft delete): it disappears from listings and the
         board but stays in the database. There is no hard delete.
@@ -164,7 +182,7 @@ def register_tools(mcp: FastMCP, service: TaskService) -> None:
         with _service_errors():
             return task_to_dict(service.archive_task(task_id))
 
-    @mcp.tool
+    @mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": False})
     def get_board() -> dict:
         """Get the whole kanban board: unarchived tasks grouped by column.
 
