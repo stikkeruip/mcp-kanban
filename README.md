@@ -1,5 +1,3 @@
 # tasks-mcp
 
-Personal four-stage kanban board (`backlog → in_progress → testing → done`) as a local MCP server, backed by SQLite.
-
-WIP — proper docs once the MCP layer lands.
+A personal kanban board as a local MCP server, backed by SQLite. Four columns — `backlog → in_progress → testing → done` — driven entirely through typed MCP tools: 
