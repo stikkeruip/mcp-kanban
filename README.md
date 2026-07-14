@@ -21,7 +21,7 @@ uv run tasks-mcp
 
 That resolves the environment, installs the single runtime dependency (`fastmcp`), and serves over stdio — uv even downloads a suitable Python if the machine has none. It is also exactly what an MCP host runs for you (see below).
 
-Install uv itself with `winget install --id=astral-sh.uv -e` (Windows) or `curl -LsSf https://astral.sh/uv/install.sh | sh` (macOS/Linux).
+To install uv itself, see the [official installation guide](https://docs.astral.sh/uv/getting-started/installation/).
 
 ### Option B: plain venv (no uv)
 
