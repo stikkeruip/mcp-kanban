@@ -41,7 +41,7 @@ class AppConfig:
     transition_policy: str
     web_host: str = DEFAULT_WEB_HOST
     web_port: int = DEFAULT_WEB_PORT
-    web_autostart: bool = True
+    web_autostart: bool = False
 
 
 def load_config(env: Mapping[str, str] = os.environ) -> AppConfig:
@@ -58,6 +58,6 @@ def load_config(env: Mapping[str, str] = os.environ) -> AppConfig:
         transition_policy=policy,
         web_host=env.get(ENV_WEB_HOST, DEFAULT_WEB_HOST),
         web_port=int(env.get(ENV_WEB_PORT, DEFAULT_WEB_PORT)),
-        web_autostart=env.get(ENV_WEB_AUTOSTART, "1").lower()
-        not in ("0", "false", "no", "off"),
+        web_autostart=env.get(ENV_WEB_AUTOSTART, "0").lower()
+        in ("1", "true", "yes", "on"),
     )

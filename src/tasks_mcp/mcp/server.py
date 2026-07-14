@@ -33,9 +33,10 @@ def build_server(config: AppConfig | None = None) -> FastMCP:
 def main() -> None:
     """Entry point (``tasks-mcp`` script): serve over stdio.
 
-    Also ensures the shared browser board is up (unless disabled via
-    ``TASKS_MCP_WEB_AUTOSTART=0``): whichever session starts first spawns
-    it; everyone else finds the port occupied and moves on.
+    If opted in via ``TASKS_MCP_WEB_AUTOSTART=1``, also ensures the shared
+    browser board is up: whichever session starts first spawns it; everyone
+    else finds the port occupied and moves on. Off by default — the web
+    view is normally started manually (see README).
     """
     cfg = load_config()
     if cfg.web_autostart:

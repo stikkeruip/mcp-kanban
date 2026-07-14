@@ -61,8 +61,10 @@ def ensure_web_running(config: AppConfig) -> subprocess.Popen | None:
         creationflags = 0
         kwargs: dict = {}
         if sys.platform == "win32":
+            # CREATE_NO_WINDOW, not DETACHED_PROCESS: the latter is known to
+            # pop up an empty console window (https://bugs.python.org/issue41619).
             creationflags = (
-                subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+                subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP
             )
         else:
             kwargs["start_new_session"] = True

@@ -82,7 +82,7 @@ Then try: *"add a task to buy milk"*, *"show my board"*, *"move it to testing"*.
 | `TASKS_MCP_TRANSITIONS` | `free` | Transition policy. `free` = any column to any column. Hook for a future `linear` policy. |
 | `TASKS_MCP_WEB_HOST` | `127.0.0.1` | Bind address for the web view. |
 | `TASKS_MCP_WEB_PORT` | `8765` | Port for the web view. |
-| `TASKS_MCP_WEB_AUTOSTART` | `1` | MCP sessions spawn the web view if it isn't running. `0` to disable. |
+| `TASKS_MCP_WEB_AUTOSTART` | `0` | Opt-in: `1` makes MCP sessions spawn the web view if it isn't running. |
 
 Set them via the `env` key of the MCP config entry if you want a non-default location.
 
@@ -100,17 +100,15 @@ Set them via the `env` key of the MCP config entry if you want a non-default loc
 
 ## Web view (drag & drop board)
 
-A browser UI over the same database, runnable alongside the MCP server (WAL mode makes concurrent access safe).
-
-**It starts itself:** whenever an MCP session launches (Claude Desktop, Claude Code, ...), it checks the web port and spawns the board in the background if nothing is listening — whichever session comes first starts it, the rest find it running. Every MCP host process is independent, but they all share the database and this one web view. Set `TASKS_MCP_WEB_AUTOSTART=0` to opt out. It keeps running after sessions close; stop it by killing the `python -m tasks_mcp.web` process.
-
-To run it manually instead:
+A browser UI over the same database, runnable alongside the MCP server (WAL mode makes concurrent access safe). Start it when you want the visual board:
 
 ```bash
 uv run python -m tasks_mcp.web        # or .venv\Scripts\python -m tasks_mcp.web with the venv install
 ```
 
-Then open <http://127.0.0.1:8765>. Drag cards between columns to move them, click a card to edit or archive it, add tasks from the header. The page polls every few seconds, so changes Claude makes through MCP appear on their own.
+Then open <http://127.0.0.1:8765>. Every MCP session (Claude Desktop, Claude Code, ...) is its own process, but they all share the database with this one web view, so it reflects everything live.
+
+To have it always available, run it at login — e.g. a shortcut in `shell:startup` pointing at `.venv\Scripts\pythonw.exe -m tasks_mcp.web` (`pythonw` runs without a console window). There is also an opt-in convenience: set `TASKS_MCP_WEB_AUTOSTART=1` in the MCP server's environment and whichever session starts first spawns the board in the background if it isn't running. Drag cards between columns to move them, click a card to edit or archive it, add tasks from the header. The page polls every few seconds, so changes Claude makes through MCP appear on their own.
 
 It exposes the same seven operations as JSON endpoints (`/api/board`, `/api/tasks`, `/api/tasks/{id}`, `/api/tasks/{id}/move`, `/api/tasks/{id}/archive`) and is built on the stdlib HTTP server — no new dependencies, no build step. Binds to localhost only by default (`TASKS_MCP_WEB_HOST` / `TASKS_MCP_WEB_PORT` to change).
 

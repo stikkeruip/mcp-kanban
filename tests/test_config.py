@@ -25,9 +25,9 @@ def test_policy_defaults_to_free_and_is_overridable(tmp_path):
     assert cfg.transition_policy == "linear"
 
 
-def test_web_autostart_defaults_on_and_can_be_disabled(tmp_path):
+def test_web_autostart_defaults_off_and_can_be_enabled(tmp_path):
     db = str(tmp_path / "t.db")
-    assert load_config(env={ENV_DB_PATH: db}).web_autostart is True
-    for value in ("0", "false", "no", "OFF"):
+    assert load_config(env={ENV_DB_PATH: db}).web_autostart is False
+    for value in ("1", "true", "YES", "on"):
         cfg = load_config(env={ENV_DB_PATH: db, ENV_WEB_AUTOSTART: value})
-        assert cfg.web_autostart is False
+        assert cfg.web_autostart is True
