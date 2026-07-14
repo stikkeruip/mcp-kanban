@@ -32,7 +32,11 @@ def connect(db_path: str | Path) -> sqlite3.Connection:
     and name-based row access. Pass ``":memory:"`` for an in-memory database
     (used by the test suite).
     """
-    conn = sqlite3.connect(str(db_path), isolation_level=None)
+    # check_same_thread=False: the MCP framework may execute tool calls on
+    # worker threads. CPython's sqlite3 is built in serialized mode
+    # (sqlite3.threadsafety == 3), so sharing this one connection across
+    # threads is safe — SQLite serializes access internally.
+    conn = sqlite3.connect(str(db_path), isolation_level=None, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
