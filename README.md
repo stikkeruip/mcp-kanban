@@ -98,6 +98,8 @@ Set them via the `env` key of the MCP config entry if you want a non-default loc
 | `archive_task` | Soft delete. No hard delete exists. |
 | `get_board` | The whole board grouped by column; always all four columns, in order. |
 | `resume_task` | Open a new terminal resuming a task's linked Claude Code chat. Without a task id it shows an interactive picker (MCP elicitation, rendered by the client). |
+| `browse_board` | Interactive board browsing in one tool call: chained client-rendered pickers navigate columns and tasks and can move/archive/resume — no model round-trips between steps, so every hop is instant. |
+| `open_board` | Start the local web server if needed and open the drag-and-drop board in the default browser. |
 
 ## Web view (drag & drop board)
 
@@ -175,7 +177,9 @@ Plugin commands are namespaced:
 
 | Command | Behavior |
 |---|---|
-| `/kanban:fetch-tasks [filters]` | Deterministic: `backlog`/`in_progress`/`testing`/`done`, `tag:<x>`, `priority:<x>`, `archived`. No args → the whole board as a table. |
+| `/kanban:ui` | Open the drag-and-drop board in the browser (starts the web server if needed). The board and the chat share one database, so each always sees the other's changes. |
+| `/kanban:board` | Interactive board in the terminal: arrow-key pickers for columns and tasks, with move/archive/resume actions. One model turn to start, then every step is instant (elicitation, no model in the loop). |
+| `/kanban:fetch-tasks [filters]` | Deterministic filters: `backlog`/`in_progress`/`testing`/`done`, `tag:<x>`, `priority:<x>`, `archived`. No args → the whole board as a table. Slower than `/kanban:board` — the model formats the output. |
 | `/kanban:add-task` | Hybrid: `"<title>" [--high\|--low] [--tag <t>]... [--desc "..."] [--link]` is applied literally (`--link` attaches this session's resume command); anything without flags is a sentence the agent turns into a task. |
 | `/kanban:resume-task [id\|keyword]` | No args → interactive picker of linked tasks. Id or unique title keyword → resumes directly. |
 

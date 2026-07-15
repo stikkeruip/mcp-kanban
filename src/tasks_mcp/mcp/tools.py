@@ -11,15 +11,18 @@ Claude as the reader.
 
 from __future__ import annotations
 
+import webbrowser
 from contextlib import contextmanager
 
 from fastmcp import Context, FastMCP
 from fastmcp.exceptions import ToolError
 
-from tasks_mcp.domain.task import Task
+from tasks_mcp.config import AppConfig
+from tasks_mcp.domain.task import Status, Task
 from tasks_mcp.resume import launch_terminal, parse_resume_link
 from tasks_mcp.services.errors import TaskServiceError
 from tasks_mcp.services.task_service import TaskService
+from tasks_mcp.web.autostart import ensure_web_running
 
 
 def task_to_dict(task: Task) -> dict:
@@ -47,8 +50,14 @@ def _service_errors():
         raise ToolError(str(exc)) from exc
 
 
-def register_tools(mcp: FastMCP, service: TaskService) -> None:
-    """Register the board tools on a FastMCP server instance."""
+def register_tools(
+    mcp: FastMCP, service: TaskService, config: AppConfig | None = None
+) -> None:
+    """Register the board tools on a FastMCP server instance.
+
+    ``config`` enables the ``open_board`` tool (it needs the web view's
+    host/port); without it every other tool still works.
+    """
 
     @mcp.tool(annotations={"destructiveHint": False, "openWorldHint": False})
     def add_task(
@@ -254,6 +263,107 @@ def register_tools(mcp: FastMCP, service: TaskService) -> None:
                 "directory": parsed[0],
                 "session_id": parsed[1],
             }
+
+    @mcp.tool(annotations={"destructiveHint": False, "openWorldHint": False})
+    def open_board() -> dict:
+        """Open the drag-and-drop kanban board in the default web browser.
+
+        Starts the local web server in the background first if nothing is
+        listening yet. The board reads the same database as these tools, so
+        changes made in the browser are immediately visible here, and
+        changes made here appear on the board within a few seconds.
+        """
+        if config is None:
+            raise ToolError("open_board is unavailable: server was built without config")
+        with _service_errors():
+            spawned = ensure_web_running(config) is not None
+            url = f"http://{config.web_host}:{config.web_port}"
+            webbrowser.open(url)
+            return {"url": url, "started_server": spawned}
+
+    @mcp.tool(annotations={"destructiveHint": False, "openWorldHint": False})
+    async def browse_board(ctx: Context = None) -> dict:
+        """Browse the kanban board interactively inside the client.
+
+        One tool call opens a chain of client-rendered pickers (no model
+        round-trips between steps, so navigation is instant): choose a
+        column, choose a task, then act on it — move it, archive it, or
+        resume its linked Claude Code chat. Navigation entries (→/←) switch
+        columns; "✕ close" ends the session.
+
+        Returns a summary of every action performed, for a one-line recap.
+        """
+        _CLOSE = "✕ close board"
+        _BACK = "← back to column"
+        with _service_errors():
+            columns = list(Status)
+            col_idx = 0
+            actions: list[str] = []
+
+            while True:
+                status = columns[col_idx]
+                tasks = service.list_tasks(status=status)
+                nav_next = f"→ {columns[(col_idx + 1) % len(columns)].value}"
+                nav_prev = f"← {columns[(col_idx - 1) % len(columns)].value}"
+                task_options = [
+                    f"#{t.id} {t.title}"
+                    + (f" [{t.priority.value}]" if t.priority.value != "normal" else "")
+                    + (" ⧉" if t.link else "")
+                    for t in tasks
+                ]
+                counts = "  ".join(
+                    f"{'▶' if s is status else ' '}{s.value}:{len(service.list_tasks(status=s))}"
+                    for s in columns
+                )
+                result = await ctx.elicit(
+                    f"Board — {counts}\nColumn '{status.value}' "
+                    f"({len(tasks)} task{'s' if len(tasks) != 1 else ''}). Pick a task or navigate:",
+                    response_type=[nav_next, nav_prev, *task_options, _CLOSE],
+                )
+                if getattr(result, "action", None) != "accept":
+                    break
+                choice = getattr(result, "data", _CLOSE)
+                if choice == _CLOSE:
+                    break
+                if choice == nav_next:
+                    col_idx = (col_idx + 1) % len(columns)
+                    continue
+                if choice == nav_prev:
+                    col_idx = (col_idx - 1) % len(columns)
+                    continue
+
+                task = service.get_task(int(choice[1:].split(" ", 1)[0]))
+                move_options = [
+                    f"move to {s.value}" for s in columns if s is not task.status
+                ]
+                action_options = list(move_options)
+                if parse_resume_link(task.link):
+                    action_options.insert(0, "resume linked chat")
+                action_options += ["archive", _BACK]
+                result = await ctx.elicit(
+                    f"#{task.id} {task.title}\n"
+                    + (f"{task.description}\n" if task.description else "")
+                    + f"priority: {task.priority.value}"
+                    + (f" | tags: {', '.join(task.tags)}" if task.tags else ""),
+                    response_type=action_options,
+                )
+                if getattr(result, "action", None) != "accept":
+                    break
+                action = getattr(result, "data", _BACK)
+                if action == _BACK:
+                    continue
+                if action == "resume linked chat":
+                    launch_terminal(*parse_resume_link(task.link))
+                    actions.append(f"resumed chat linked to #{task.id} {task.title}")
+                elif action == "archive":
+                    service.archive_task(task.id)
+                    actions.append(f"archived #{task.id} {task.title}")
+                elif action.startswith("move to "):
+                    target = action.removeprefix("move to ")
+                    service.move_task(task.id, target)
+                    actions.append(f"moved #{task.id} {task.title} to {target}")
+
+            return {"actions": actions or ["browsed the board, no changes"]}
 
     @mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": False})
     def get_board() -> dict:

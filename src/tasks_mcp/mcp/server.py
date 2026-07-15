@@ -26,7 +26,7 @@ def build_server(config: AppConfig | None = None) -> FastMCP:
             "add_task to capture work, and move_task to advance it."
         ),
     )
-    register_tools(mcp, service)
+    register_tools(mcp, service, cfg)
     return mcp
 
 

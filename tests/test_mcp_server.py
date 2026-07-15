@@ -20,6 +20,8 @@ EXPECTED_TOOLS = {
     "archive_task",
     "get_board",
     "resume_task",
+    "browse_board",
+    "open_board",
 }
 
 
@@ -104,6 +106,27 @@ def test_database_persists_across_server_instances(tmp_path):
     call(make_server(tmp_path), "add_task", {"title": "durable"})
     tasks = call(make_server(tmp_path), "list_tasks")
     assert [t["title"] for t in tasks] == ["durable"]
+
+
+class TestOpenBoard:
+    def test_opens_browser_and_reports_url(self, tmp_path, monkeypatch):
+        import tasks_mcp.mcp.tools as tools_module
+
+        opened = []
+        monkeypatch.setattr(
+            tools_module.webbrowser, "open", lambda url: opened.append(url)
+        )
+        monkeypatch.setattr(tools_module, "ensure_web_running", lambda cfg: None)
+        cfg = AppConfig(
+            db_path=tmp_path / "tasks.db",
+            transition_policy="free",
+            web_host="127.0.0.1",
+            web_port=9999,
+        )
+        result = call(build_server(cfg), "open_board")
+        assert result["url"] == "http://127.0.0.1:9999"
+        assert result["started_server"] is False
+        assert opened == ["http://127.0.0.1:9999"]
 
 
 class TestResumeTask:
