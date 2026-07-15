@@ -41,6 +41,18 @@ _STATIC_DIR = Path(__file__).parent / "static"
 _TASK_ROUTE = re.compile(r"^/api/tasks/(\d+)$")
 _MOVE_ROUTE = re.compile(r"^/api/tasks/(\d+)/move$")
 _ARCHIVE_ROUTE = re.compile(r"^/api/tasks/(\d+)/archive$")
+_RESUME_ROUTE = re.compile(r"^/api/tasks/(\d+)/resume$")
+
+# Cross-site defense: browsers let any webpage POST to 127.0.0.1, and a
+# "launch a terminal" endpoint must not be reachable that way. Requiring a
+# custom header forces a CORS preflight for cross-origin callers, which
+# this server never approves. Our own UI sends the header on every call.
+_GUARD_HEADER = "X-Tasks-MCP"
+
+# Re-exported under the old names: tests and the handler use these, and the
+# implementation now lives in tasks_mcp.resume (shared with the MCP tool).
+from tasks_mcp.resume import launch_terminal as _launch_terminal  # noqa: E402
+from tasks_mcp.resume import parse_resume_link  # noqa: E402, F401
 
 
 def task_to_dict(task: Task) -> dict:
@@ -60,6 +72,7 @@ def task_to_dict(task: Task) -> dict:
         "created_at": task.created_at.isoformat(),
         "updated_at": task.updated_at.isoformat(),
         "archived": task.archived,
+        "link": task.link,
     }
 
 
@@ -128,6 +141,7 @@ class KanbanRequestHandler(BaseHTTPRequestHandler):
                 description=body.get("description"),
                 priority=body.get("priority", "normal"),
                 tags=body.get("tags"),
+                link=body.get("link"),
             )
             self._json(201, task_to_dict(task))
             return
@@ -143,7 +157,31 @@ class KanbanRequestHandler(BaseHTTPRequestHandler):
         if match:
             self._json(200, task_to_dict(self.service.archive_task(int(match.group(1)))))
             return
+        match = _RESUME_ROUTE.match(path)
+        if match:
+            self._resume(int(match.group(1)))
+            return
         self._json(404, {"error": f"no such endpoint: POST {path}"})
+
+    def _resume(self, task_id: int) -> None:
+        """Open a terminal resuming the Claude Code session in a task's link."""
+        if self.headers.get(_GUARD_HEADER) != "1":
+            self._json(403, {"error": f"missing {_GUARD_HEADER} header"})
+            return
+        task = self.service.get_task(task_id)
+        parsed = parse_resume_link(task.link)
+        if parsed is None:
+            self._json(
+                400,
+                {
+                    "error": "task's link is not a resume command "
+                    '(expected "cd <dir>; claude -r <session-id>")'
+                },
+            )
+            return
+        directory, session_id = parsed
+        _launch_terminal(directory, session_id)
+        self._json(200, {"launched": True, "directory": directory, "session_id": session_id})
 
     def _patch_routes(self) -> None:
         path = urlparse(self.path).path
@@ -156,6 +194,7 @@ class KanbanRequestHandler(BaseHTTPRequestHandler):
                 description=body.get("description"),
                 priority=body.get("priority"),
                 tags=body.get("tags"),
+                link=body.get("link"),
             )
             self._json(200, task_to_dict(task))
             return

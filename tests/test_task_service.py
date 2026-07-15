@@ -92,6 +92,11 @@ class TestAddTask:
     def test_empty_description_normalizes_to_none(self, service):
         assert service.add_task("x", description="   ").description is None
 
+    def test_link_is_stored_and_blank_normalizes_to_none(self, service):
+        task = service.add_task("x", link="cd C:\\p; claude -r abc")
+        assert task.link == "cd C:\\p; claude -r abc"
+        assert service.add_task("y", link="   ").link is None
+
 
 class TestGetAndList:
     def test_get_missing_raises(self, service):
@@ -148,6 +153,12 @@ class TestEditTask:
         task = service.add_task("x")
         with pytest.raises(ValidationError):
             service.edit_task(task.id, title="  ")
+
+    def test_link_alone_is_a_valid_edit_and_empty_string_clears(self, service):
+        task = service.add_task("x")
+        edited = service.edit_task(task.id, link="cd C:\\p; claude -r abc")
+        assert edited.link == "cd C:\\p; claude -r abc"
+        assert service.edit_task(task.id, link="").link is None
 
 
 class TestMoveTask:

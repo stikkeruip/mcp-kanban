@@ -56,6 +56,10 @@
     font-size: 11px; background: #e4e6ea; color: var(--muted);
     border-radius: 3px; padding: 1px 6px;
   }
+  .link-chip {
+    font-size: 11px; background: #fff; color: var(--accent);
+    border: 1px solid #c1c7d0; border-radius: 3px; padding: 0 6px; cursor: pointer;
+  }
 
   dialog {
     border: none; border-radius: 8px; padding: 20px; width: min(440px, 92vw);
@@ -109,6 +113,9 @@
     <label>Tags (comma separated)
       <input id="edit-tags">
     </label>
+    <label>Link (URL or resume command, e.g. "cd C:\proj; claude -r &lt;session-id&gt;")
+      <input id="edit-link">
+    </label>
     <menu>
       <button value="archive" class="danger" formnovalidate>Archive</button>
       <button value="cancel" formnovalidate>Cancel</button>
@@ -133,7 +140,7 @@ let editingTask = null;  // task object open in the dialog, or null
 
 async function api(path, options = {}) {
   const res = await fetch(path, {
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", "X-Tasks-MCP": "1" },
     ...options,
   });
   if (!res.ok) {
@@ -195,13 +202,38 @@ function renderCard(task) {
   title.textContent = task.title;
   card.appendChild(title);
 
-  if (task.tags.length) {
+  if (task.tags.length || task.link) {
     const meta = document.createElement("div");
     meta.className = "meta";
     for (const tag of task.tags) {
       const chip = document.createElement("span");
       chip.className = "tag";
       chip.textContent = tag;
+      meta.appendChild(chip);
+    }
+    if (task.link) {
+      const resumable = /^cd\s+.+?;\s*claude\s+-r\s+[0-9a-fA-F-]{8,}\s*$/.test(task.link);
+      const chip = document.createElement("button");
+      chip.type = "button";
+      chip.className = "link-chip";
+      const label = resumable ? "▶ resume" : "⧉ link";
+      chip.textContent = label;
+      chip.title = (resumable ? "Open a terminal and resume:\n" : "Copy to clipboard:\n") + task.link;
+      chip.addEventListener("click", async (event) => {
+        event.stopPropagation();
+        try {
+          if (resumable) {
+            await api(`/api/tasks/${task.id}/resume`, { method: "POST" });
+            chip.textContent = "✓ opened";
+          } else {
+            await navigator.clipboard.writeText(task.link);
+            chip.textContent = "✓ copied";
+          }
+        } catch (error) {
+          alert(error.message);
+        }
+        setTimeout(() => { chip.textContent = label; }, 1500);
+      });
       meta.appendChild(chip);
     }
     card.appendChild(meta);
@@ -256,6 +288,7 @@ function openEditor(task) {
   $("edit-desc").value = task.description || "";
   $("edit-priority").value = task.priority;
   $("edit-tags").value = task.tags.join(", ");
+  $("edit-link").value = task.link || "";
   $("edit-dialog").showModal();
 }
 
@@ -282,6 +315,7 @@ $("edit-dialog").addEventListener("close", async () => {
       description: $("edit-desc").value,  // empty string clears it
       priority: $("edit-priority").value,
       tags,
+      link: $("edit-link").value,         // empty string clears it
     }),
   }));
 });

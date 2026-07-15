@@ -1,0 +1,14 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python -c \"import sys,json,os; d=json.load(sys.stdin); p=os.path.join(d['cwd'],'.claude'); os.makedirs(p,exist_ok=True); open(os.path.join(p,'last-session-id'),'w').write(d['session_id'])\""
+          }
+        ]
+      }
+    ]
+  }
+}

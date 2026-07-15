@@ -19,6 +19,7 @@ EXPECTED_TOOLS = {
     "move_task",
     "archive_task",
     "get_board",
+    "resume_task",
 }
 
 
@@ -60,9 +61,15 @@ def test_full_flow_through_the_protocol(tmp_path):
     created = call(
         server,
         "add_task",
-        {"title": "Ship v1", "priority": "high", "tags": ["mcp"]},
+        {
+            "title": "Ship v1",
+            "priority": "high",
+            "tags": ["mcp"],
+            "link": "cd C:\\dev\\proj; claude -r abc-123",
+        },
     )
     assert created["status"] == "backlog"
+    assert created["link"] == "cd C:\\dev\\proj; claude -r abc-123"
     task_id = created["id"]
 
     moved = call(server, "move_task", {"task_id": task_id, "target_status": "testing"})
@@ -97,3 +104,35 @@ def test_database_persists_across_server_instances(tmp_path):
     call(make_server(tmp_path), "add_task", {"title": "durable"})
     tasks = call(make_server(tmp_path), "list_tasks")
     assert [t["title"] for t in tasks] == ["durable"]
+
+
+class TestResumeTask:
+    LINK = "cd C:\\dev\\proj; claude -r dd6539d3-de89-4009-b049-02614e09f223"
+
+    def test_direct_resume_launches_terminal(self, tmp_path, monkeypatch):
+        import tasks_mcp.mcp.tools as tools_module
+
+        calls = []
+        monkeypatch.setattr(
+            tools_module, "launch_terminal", lambda d, s: calls.append((d, s))
+        )
+        server = make_server(tmp_path)
+        task = call(server, "add_task", {"title": "parked", "link": self.LINK})
+        result = call(server, "resume_task", {"task_id": task["id"]})
+        assert result["launched"] is True
+        assert result["title"] == "parked"
+        assert calls == [
+            ("C:\\dev\\proj", "dd6539d3-de89-4009-b049-02614e09f223")
+        ]
+
+    def test_task_without_resume_link_is_a_clean_error(self, tmp_path):
+        server = make_server(tmp_path)
+        task = call(server, "add_task", {"title": "plain"})
+        with pytest.raises(Exception, match="no resume-command link"):
+            call(server, "resume_task", {"task_id": task["id"]})
+
+    def test_no_linked_tasks_is_a_clean_error(self, tmp_path):
+        server = make_server(tmp_path)
+        call(server, "add_task", {"title": "nothing linked"})
+        with pytest.raises(Exception, match="no tasks have resume-command links"):
+            call(server, "resume_task")

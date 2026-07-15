@@ -42,15 +42,41 @@ def repo(conn):
     return SqliteTaskRepository(conn)
 
 
+LATEST_SCHEMA_VERSION = 2
+
+
 class TestMigrations:
-    def test_fresh_db_migrates_to_version_1(self):
+    def test_fresh_db_migrates_to_latest_version(self):
         conn = connect(":memory:")
-        assert run_migrations(conn) == 1
-        assert get_version(conn) == 1
+        assert run_migrations(conn) == LATEST_SCHEMA_VERSION
+        assert get_version(conn) == LATEST_SCHEMA_VERSION
 
     def test_rerun_is_idempotent(self, conn):
-        assert run_migrations(conn) == 1
-        assert run_migrations(conn) == 1
+        assert run_migrations(conn) == LATEST_SCHEMA_VERSION
+        assert run_migrations(conn) == LATEST_SCHEMA_VERSION
+
+    def test_v1_database_upgrades_in_place_with_data_intact(self, tmp_path):
+        """A DB created before 002 gains the link column without data loss."""
+        import shutil
+
+        from tasks_mcp.storage.migrations.runner import MIGRATIONS_DIR
+
+        v1_dir = tmp_path / "v1_migrations"
+        v1_dir.mkdir()
+        shutil.copy(MIGRATIONS_DIR / "001_initial.sql", v1_dir / "001_initial.sql")
+
+        conn = connect(tmp_path / "old.db")
+        assert run_migrations(conn, v1_dir) == 1
+        conn.execute(
+            "INSERT INTO tasks (title, created_at, updated_at)"
+            " VALUES ('pre-existing', '2026-01-01', '2026-01-01')"
+        )
+        assert run_migrations(conn) == LATEST_SCHEMA_VERSION  # real migrations dir
+        repo = SqliteTaskRepository(conn)
+        (task,) = repo.list()
+        assert task.title == "pre-existing"
+        assert task.link is None
+        conn.close()
 
     def test_tasks_table_and_indexes_exist(self, conn):
         names = {
@@ -109,6 +135,11 @@ class TestRoundTrip:
         fetched = repo.get(repo.add(make_task()).id)
         assert fetched.created_at == NOW
         assert fetched.created_at.tzinfo is not None
+
+    def test_link_round_trips(self, repo):
+        stored = repo.add(make_task(link="cd C:\\dev\\proj; claude -r abc-123"))
+        assert repo.get(stored.id).link == "cd C:\\dev\\proj; claude -r abc-123"
+        assert repo.get(repo.add(make_task()).id).link is None
 
     def test_archived_round_trips_as_bool(self, repo):
         fetched = repo.get(repo.add(make_task(archived=True)).id)

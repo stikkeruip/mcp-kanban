@@ -28,11 +28,16 @@ def base_url(tmp_path):
     httpd.server_close()
 
 
-def request(method: str, url: str, body: dict | None = None):
+def request(
+    method: str, url: str, body: dict | None = None, headers: dict | None = None
+):
     """Return (status, parsed JSON) without raising on 4xx."""
     data = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(
-        url, data=data, method=method, headers={"Content-Type": "application/json"}
+        url,
+        data=data,
+        method=method,
+        headers={"Content-Type": "application/json", **(headers or {})},
     )
     try:
         with urllib.request.urlopen(req) as res:
@@ -104,6 +109,14 @@ class TestApi:
         _, everything = request("GET", f"{base_url}/api/tasks?include_archived=true")
         assert [t["id"] for t in everything] == [task["id"]]
 
+    def test_link_can_be_set_and_cleared(self, base_url):
+        task = add(base_url, "parked", link="cd C:\\p; claude -r abc-123")
+        assert task["link"] == "cd C:\\p; claude -r abc-123"
+        status, edited = request(
+            "PATCH", f"{base_url}/api/tasks/{task['id']}", {"link": ""}
+        )
+        assert status == 200 and edited["link"] is None
+
     def test_list_filters(self, base_url):
         add(base_url, "a", tags=["home"])
         b = add(base_url, "b", priority="high")
@@ -111,6 +124,76 @@ class TestApi:
         assert [t["id"] for t in high] == [b["id"]]
         _, home = request("GET", f"{base_url}/api/tasks?tag=home")
         assert [t["title"] for t in home] == ["a"]
+
+
+class TestResumeLinkParsing:
+    def test_valid_resume_links_parse(self):
+        from tasks_mcp.web.server import parse_resume_link
+
+        assert parse_resume_link(
+            "cd C:\\dev\\proj; claude -r dd6539d3-de89-4009-b049-02614e09f223"
+        ) == ("C:\\dev\\proj", "dd6539d3-de89-4009-b049-02614e09f223")
+        assert parse_resume_link("cd '/home/u/my proj'; claude -r abc-123-def") == (
+            "/home/u/my proj",
+            "abc-123-def",
+        )
+
+    @pytest.mark.parametrize(
+        "bad",
+        [
+            None,
+            "",
+            "https://example.com/ticket/42",
+            "cd C:\\p; rm -rf /",
+            "cd C:\\p; claude -r abc; shutdown /s",
+            "claude -r abc-123-def",
+        ],
+    )
+    def test_non_resume_links_are_rejected(self, bad):
+        from tasks_mcp.web.server import parse_resume_link
+
+        assert parse_resume_link(bad) is None
+
+
+class TestResumeEndpoint:
+    RESUME_LINK = "cd C:\\dev\\proj; claude -r dd6539d3-de89-4009-b049-02614e09f223"
+    GUARD = {"X-Tasks-MCP": "1"}
+
+    def test_requires_guard_header(self, base_url):
+        task = add(base_url, link=self.RESUME_LINK)
+        status, body = request("POST", f"{base_url}/api/tasks/{task['id']}/resume")
+        assert status == 403
+        assert "X-Tasks-MCP" in body["error"]
+
+    def test_rejects_non_resume_links(self, base_url):
+        task = add(base_url, link="https://example.com/not-a-command")
+        status, body = request(
+            "POST", f"{base_url}/api/tasks/{task['id']}/resume", headers=self.GUARD
+        )
+        assert status == 400
+        assert "not a resume command" in body["error"]
+
+    def test_launches_terminal_with_parsed_parts(self, base_url, monkeypatch):
+        import tasks_mcp.web.server as web_server
+
+        calls = []
+        monkeypatch.setattr(
+            web_server, "_launch_terminal", lambda d, s: calls.append((d, s))
+        )
+        task = add(base_url, link=self.RESUME_LINK)
+        status, body = request(
+            "POST", f"{base_url}/api/tasks/{task['id']}/resume", headers=self.GUARD
+        )
+        assert status == 200 and body["launched"] is True
+        assert calls == [
+            ("C:\\dev\\proj", "dd6539d3-de89-4009-b049-02614e09f223")
+        ]
+
+    def test_missing_task_is_404(self, base_url):
+        status, _ = request(
+            "POST", f"{base_url}/api/tasks/999/resume", headers=self.GUARD
+        )
+        assert status == 404
 
 
 class TestErrorMapping:

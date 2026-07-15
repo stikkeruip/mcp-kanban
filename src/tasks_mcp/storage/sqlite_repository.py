@@ -22,7 +22,10 @@ from tasks_mcp.domain.task import Priority, Status, Task
 from tasks_mcp.storage.errors import ConstraintViolation, RowNotFound, StorageError
 from tasks_mcp.storage.repository import TaskRepository
 
-_COLUMNS = "id, title, description, status, priority, tags, created_at, updated_at, archived"
+_COLUMNS = (
+    "id, title, description, status, priority, tags, "
+    "created_at, updated_at, archived, link"
+)
 
 
 def connect(db_path: str | Path) -> sqlite3.Connection:
@@ -64,8 +67,8 @@ class SqliteTaskRepository(TaskRepository):
             """
             INSERT INTO tasks
                 (title, description, status, priority, tags,
-                 created_at, updated_at, archived)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                 created_at, updated_at, archived, link)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             self._task_to_params(task),
         )
@@ -117,7 +120,8 @@ class SqliteTaskRepository(TaskRepository):
             """
             UPDATE tasks
                SET title = ?, description = ?, status = ?, priority = ?,
-                   tags = ?, created_at = ?, updated_at = ?, archived = ?
+                   tags = ?, created_at = ?, updated_at = ?, archived = ?,
+                   link = ?
              WHERE id = ?
             """,
             self._task_to_params(task) + (task.id,),
@@ -145,6 +149,7 @@ class SqliteTaskRepository(TaskRepository):
             task.created_at.isoformat(),
             task.updated_at.isoformat(),
             1 if task.archived else 0,
+            task.link,
         )
 
     @staticmethod
@@ -160,6 +165,7 @@ class SqliteTaskRepository(TaskRepository):
             created_at=datetime.fromisoformat(row["created_at"]),
             updated_at=datetime.fromisoformat(row["updated_at"]),
             archived=bool(row["archived"]),
+            link=row["link"],
         )
 
     # -- error translation ---------------------------------------------

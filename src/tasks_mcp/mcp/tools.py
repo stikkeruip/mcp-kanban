@@ -13,10 +13,11 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 
-from fastmcp import FastMCP
+from fastmcp import Context, FastMCP
 from fastmcp.exceptions import ToolError
 
 from tasks_mcp.domain.task import Task
+from tasks_mcp.resume import launch_terminal, parse_resume_link
 from tasks_mcp.services.errors import TaskServiceError
 from tasks_mcp.services.task_service import TaskService
 
@@ -33,6 +34,7 @@ def task_to_dict(task: Task) -> dict:
         "created_at": task.created_at.isoformat(),
         "updated_at": task.updated_at.isoformat(),
         "archived": task.archived,
+        "link": task.link,
     }
 
 
@@ -46,7 +48,7 @@ def _service_errors():
 
 
 def register_tools(mcp: FastMCP, service: TaskService) -> None:
-    """Register the seven board tools on a FastMCP server instance."""
+    """Register the board tools on a FastMCP server instance."""
 
     @mcp.tool(annotations={"destructiveHint": False, "openWorldHint": False})
     def add_task(
@@ -54,6 +56,7 @@ def register_tools(mcp: FastMCP, service: TaskService) -> None:
         description: str | None = None,
         priority: str = "normal",
         tags: list[str] | None = None,
+        link: str | None = None,
     ) -> dict:
         """Add a new task to the board. It lands in the 'backlog' column.
 
@@ -62,13 +65,21 @@ def register_tools(mcp: FastMCP, service: TaskService) -> None:
             description: Optional longer free-text detail.
             priority: One of 'low', 'normal', 'high'. Defaults to 'normal'.
             tags: Optional list of labels for filtering, e.g. ["work", "errand"].
+            link: Optional pointer back to the task's context — a URL or a
+                command that reopens it. To park a Claude Code chat for
+                later, store its resume command here, e.g.
+                "cd C:\\dev\\myproject; claude -r <session-id>".
 
         Returns the created task, including its assigned numeric id.
         """
         with _service_errors():
             return task_to_dict(
                 service.add_task(
-                    title, description=description, priority=priority, tags=tags
+                    title,
+                    description=description,
+                    priority=priority,
+                    tags=tags,
+                    link=link,
                 )
             )
 
@@ -125,13 +136,14 @@ def register_tools(mcp: FastMCP, service: TaskService) -> None:
         description: str | None = None,
         priority: str | None = None,
         tags: list[str] | None = None,
+        link: str | None = None,
     ) -> dict:
-        """Edit a task's title, description, priority, and/or tags.
+        """Edit a task's title, description, priority, tags, and/or link.
 
         Only the fields you pass are changed; omitted fields keep their
-        current value. Pass an empty string for description to clear it.
-        Passing tags replaces the whole tag list. To change a task's column,
-        use move_task instead.
+        current value. Pass an empty string for description or link to clear
+        it. Passing tags replaces the whole tag list. To change a task's
+        column, use move_task instead.
 
         Returns the updated task.
         """
@@ -143,6 +155,7 @@ def register_tools(mcp: FastMCP, service: TaskService) -> None:
                     description=description,
                     priority=priority,
                     tags=tags,
+                    link=link,
                 )
             )
 
@@ -181,6 +194,66 @@ def register_tools(mcp: FastMCP, service: TaskService) -> None:
         """
         with _service_errors():
             return task_to_dict(service.archive_task(task_id))
+
+    @mcp.tool(annotations={"destructiveHint": False, "openWorldHint": False})
+    async def resume_task(task_id: int | None = None, ctx: Context = None) -> dict:
+        """Resume the Claude Code chat linked to a task, in a new terminal.
+
+        With task_id: opens that task's linked chat directly. Without it:
+        shows the user an interactive picker (rendered by the client) of all
+        tasks whose link is a resume command, and opens the selected one.
+
+        Only links of the exact shape "cd <dir>; claude -r <session-id>"
+        can be launched. The new terminal opens in the task's original
+        directory — required, because claude only finds sessions from the
+        directory they were created in.
+        """
+        with _service_errors():
+            if task_id is not None:
+                task = service.get_task(task_id)
+                parsed = parse_resume_link(task.link)
+                if parsed is None:
+                    raise ToolError(
+                        f"task {task_id} has no resume-command link "
+                        '(expected "cd <dir>; claude -r <session-id>")'
+                    )
+                launch_terminal(*parsed)
+                return {
+                    "launched": True,
+                    "task_id": task.id,
+                    "title": task.title,
+                    "directory": parsed[0],
+                    "session_id": parsed[1],
+                }
+
+            candidates = [
+                (task, parsed)
+                for task in service.list_tasks()
+                if (parsed := parse_resume_link(task.link)) is not None
+            ]
+            if not candidates:
+                raise ToolError("no tasks have resume-command links")
+            options = [
+                f"#{task.id} {task.title} [{task.status.value}]"
+                for task, _ in candidates
+            ]
+            result = await ctx.elicit(
+                "Which parked chat do you want to resume?", response_type=options
+            )
+            if getattr(result, "action", "accept") != "accept":
+                return {"launched": False, "cancelled": True}
+            choice = getattr(result, "data", None)
+            if choice not in options:
+                raise ToolError(f"unexpected selection: {choice!r}")
+            task, parsed = candidates[options.index(choice)]
+            launch_terminal(*parsed)
+            return {
+                "launched": True,
+                "task_id": task.id,
+                "title": task.title,
+                "directory": parsed[0],
+                "session_id": parsed[1],
+            }
 
     @mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": False})
     def get_board() -> dict:

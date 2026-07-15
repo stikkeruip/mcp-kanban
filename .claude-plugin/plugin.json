@@ -1,0 +1,19 @@
+{
+  "name": "kanban",
+  "description": "Personal four-stage kanban board: MCP server, slash commands, and session-parking hook",
+  "version": "1.0.0",
+  "author": { "name": "stikkeruip" },
+  "mcpServers": {
+    "tasks": {
+      "command": "uv",
+      "args": [
+        "--directory",
+        "${CLAUDE_PLUGIN_ROOT}",
+        "run",
+        "python",
+        "-m",
+        "tasks_mcp"
+      ]
+    }
+  }
+}

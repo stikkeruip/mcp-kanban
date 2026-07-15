@@ -52,6 +52,7 @@ class TaskService:
         description: str | None = None,
         priority: Priority | str = Priority.NORMAL,
         tags: list[str] | None = None,
+        link: str | None = None,
     ) -> Task:
         """Create a task in the backlog and return it (with its new id)."""
         now = self._now()
@@ -65,6 +66,7 @@ class TaskService:
             created_at=now,
             updated_at=now,
             archived=False,
+            link=self._clean_link(link),
         )
         return self._repo.add(task)
 
@@ -102,14 +104,22 @@ class TaskService:
         description: str | None = None,
         priority: Priority | str | None = None,
         tags: list[str] | None = None,
+        link: str | None = None,
     ) -> Task:
         """Update the given fields of a task; omitted (None) fields keep their value.
 
-        Passing an empty string for ``description`` clears it. At least one
-        field must be provided. Status changes go through ``move_task``, not
-        here — moving columns is a distinct operation with its own rules.
+        Passing an empty string for ``description`` or ``link`` clears it.
+        At least one field must be provided. Status changes go through
+        ``move_task``, not here — moving columns is a distinct operation
+        with its own rules.
         """
-        if title is None and description is None and priority is None and tags is None:
+        if (
+            title is None
+            and description is None
+            and priority is None
+            and tags is None
+            and link is None
+        ):
             raise ValidationError("nothing to update: provide at least one field")
         task = self.get_task(task_id)
         if title is not None:
@@ -120,6 +130,8 @@ class TaskService:
             task.priority = self._coerce_priority(priority)
         if tags is not None:
             task.tags = self._clean_tags(tags)
+        if link is not None:
+            task.link = self._clean_link(link)
         task.updated_at = self._now()
         return self._repo.update(task)
 
@@ -180,6 +192,14 @@ class TaskService:
         if not isinstance(description, str):
             raise ValidationError("description must be a string")
         return description.strip() or None
+
+    @staticmethod
+    def _clean_link(link: str | None) -> str | None:
+        if link is None:
+            return None
+        if not isinstance(link, str):
+            raise ValidationError("link must be a string")
+        return link.strip() or None
 
     @staticmethod
     def _clean_tags(tags: list[str] | None) -> list[str]:

@@ -44,6 +44,10 @@ class Task:
     ``id`` is ``None`` before the task has been persisted; the repository
     assigns it on insert. ``tags`` is a real ``list[str]`` here; serialization
     to a storage format is not the domain's concern.
+
+    ``link`` is an optional pointer back to where the task came from — a URL
+    or a command that reopens its context (e.g. a ``claude -r <session-id>``
+    resume command for a parked chat).
     """
 
     id: int | None
@@ -55,3 +59,4 @@ class Task:
     created_at: datetime
     updated_at: datetime
     archived: bool
+    link: str | None = None
